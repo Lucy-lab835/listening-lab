@@ -30,6 +30,18 @@ type SavedState = {
   selectedVoice: string;
 };
 
+class TtsRequestError extends Error {
+  status: number;
+  retryable: boolean;
+
+  constructor(status: number, message: string, retryable: boolean) {
+    super(message);
+    this.name = 'TtsRequestError';
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
+
 const VOICES = [
   { id: 'Leda', name: 'Leda', description: 'Clear, bright voice' },
   { id: 'Kore', name: 'Kore', description: 'Warm, natural voice' },
@@ -80,6 +92,15 @@ function loadLocalState(): SavedState | null {
 
 function saveLocalState(state: SavedState) {
   window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+}
+
+async function getGeminiErrorMessage(response: Response) {
+  try {
+    const data = await response.json();
+    return data.error?.message || response.statusText || `Request failed with status ${response.status}`;
+  } catch {
+    return response.statusText || `Request failed with status ${response.status}`;
+  }
 }
 
 function App() {
@@ -234,11 +255,21 @@ function App() {
       );
 
       if (!response.ok) {
+        const details = await getGeminiErrorMessage(response);
+
         if (response.status === 429) {
-          throw new Error('Gemini TTS quota or rate limit was reached. Wait a while, reduce requests, or check billing/quota in Google AI Studio.');
+          throw new TtsRequestError(
+            response.status,
+            `Gemini TTS quota or rate limit was reached. ${details}`,
+            true,
+          );
         }
 
-        throw new Error(`TTS request failed: ${response.status}`);
+        if (response.status >= 500) {
+          throw new TtsRequestError(response.status, `Gemini service error ${response.status}. ${details}`, true);
+        }
+
+        throw new TtsRequestError(response.status, `Gemini request error ${response.status}. ${details}`, false);
       }
 
       const data = await response.json();
@@ -260,7 +291,9 @@ function App() {
       });
       window.setTimeout(() => attemptPlay(), 100);
     } catch (error) {
-      if (retryCount < 3) {
+      const shouldRetry = error instanceof TtsRequestError ? error.retryable : true;
+
+      if (shouldRetry && retryCount < 3) {
         window.setTimeout(() => fetchAudio(retryCount + 1), 1000 * 2 ** retryCount);
         return;
       }
