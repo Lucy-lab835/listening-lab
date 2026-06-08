@@ -233,7 +233,13 @@ function App() {
         },
       );
 
-      if (!response.ok) throw new Error(`TTS request failed: ${response.status}`);
+      if (!response.ok) {
+        if (response.status === 429) {
+          throw new Error('Gemini TTS quota or rate limit was reached. Wait a while, reduce requests, or check billing/quota in Google AI Studio.');
+        }
+
+        throw new Error(`TTS request failed: ${response.status}`);
+      }
 
       const data = await response.json();
       const base64Audio = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
