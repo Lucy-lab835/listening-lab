@@ -261,7 +261,7 @@ function App() {
           throw new TtsRequestError(
             response.status,
             `Gemini TTS quota or rate limit was reached. ${details}`,
-            true,
+            false,
           );
         }
 
